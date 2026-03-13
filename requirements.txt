@@ -5,3 +5,5 @@ opencv-python-headless==4.9.0.80
 numpy==1.26.4
 qrcode==7.4.2
 reportlab==4.1.0
+supabase==2.4.1
+postgrest==0.16.2

@@ -3,7 +3,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import os
-import sqlite3
+from supabase import create_client, Client
 import io
 import csv
 import datetime
@@ -21,23 +21,24 @@ app.secret_key = "qr_threat_detector_secret_key_2024"
 BASE_DIR = "."
 UPLOAD_FOLDER = "static/uploads"
 REPORT_FOLDER = "static/reports"
-DB_PATH = "instance/database.db"
+
+# Supabase SDK Configuration
+SUPABASE_URL = "https://eeloeocxzuaagnhmklmf.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlbG9lb2N4enVhYWduaG1rbG1mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0MDkyNDIsImV4cCI6MjA4ODk4NTI0Mn0.RYd9MHMF7JXu3hdLrAGxFcWX9_ywgJNkuvAl1m2jR-Q"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Bulletproof check for Vercel/Read-Only filesystem
 try:
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(REPORT_FOLDER, exist_ok=True)
-    os.makedirs("instance", exist_ok=True)
 except (PermissionError, OSError):
     # If we get a permission error (e.g. on Vercel serverless), switch EVERYTHING to /tmp
     BASE_DIR = "/tmp"
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "static/uploads")
     REPORT_FOLDER = os.path.join(BASE_DIR, "static/reports")
-    DB_PATH = os.path.join(BASE_DIR, "instance/database.db")
     
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(REPORT_FOLDER, exist_ok=True)
-    os.makedirs(os.path.join(BASE_DIR, "instance"), exist_ok=True)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -56,52 +57,32 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    user = c.fetchone()
-    conn.close()
-    if user:
-        return User(user['id'], user['username'], user['email'], user['password_hash'], user['role'], user['created_at'])
+    try:
+        response = supabase.table('users').select('*').eq('id', user_id).execute()
+        if response.data:
+            user = response.data[0]
+            return User(user['id'], user['username'], user['email'], user['password_hash'], user['role'], user['created_at'])
+    except Exception as e:
+        print(f"Error loading user {user_id}: {e}")
     return None
 
-# Database initialization
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # Users table
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, email TEXT UNIQUE, 
-                  password_hash TEXT, role TEXT DEFAULT 'user', theme TEXT DEFAULT 'dark',
-                  created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Scans table
-    c.execute('''CREATE TABLE IF NOT EXISTS scans
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, url TEXT, 
-                  score INTEGER, verdict TEXT, category TEXT, timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-                  favorite INTEGER DEFAULT 0, notes TEXT,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
-    
-    # API keys table removed
-    
-    # Settings table
-    c.execute('''CREATE TABLE IF NOT EXISTS settings
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, key TEXT, value TEXT,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
-    
-    # Create default admin user if not exists
-    c.execute("SELECT * FROM users WHERE username = 'admin'")
-    if not c.fetchone():
-        admin_hash = generate_password_hash("admin123")
-        c.execute("INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                  ("admin", "admin@qrthreat.com", admin_hash, "admin"))
-    
-    conn.commit()
-    conn.close()
-
-init_db()
+# Helper functions
+def log_scan(user_id, url, risk, category='general'):
+    try:
+        data = {
+            "user_id": user_id,
+            "url": url,
+            "score": risk['score'],
+            "verdict": risk['verdict'],
+            "category": category,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        response = supabase.table('scans').insert(data).execute()
+        if response.data:
+            return response.data[0]['id']
+    except Exception as e:
+        print(f"Error logging scan: {e}")
+    return None
 
 # Admin decorator
 def admin_required(f):
@@ -112,35 +93,6 @@ def admin_required(f):
             return redirect(url_for('dashboard'))
         return f(*args, **kwargs)
     return decorated_function
-
-# Helper functions
-def get_db_connection():
-    # In a serverless environment like Vercel, /tmp can be wiped at any time.
-    # If the user has an active session cookie but the DB was wiped, we need
-    # to recreate the tables before querying to prevent crashes.
-    conn = sqlite3.connect(DB_PATH)
-    
-    # Quick check if tables exist, if not run init_db logic
-    c = conn.cursor()
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-    if not c.fetchone():
-        conn.close()
-        init_db()
-        conn = sqlite3.connect(DB_PATH)
-        
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def log_scan(user_id, url, risk, category='general'):
-    conn = get_db_connection()
-    c = conn.cursor()
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("INSERT INTO scans (user_id, url, score, verdict, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-              (user_id, url, risk['score'], risk['verdict'], category, timestamp))
-    conn.commit()
-    scan_id = c.lastrowid
-    conn.close()
-    return scan_id
 
 # Routes
 @app.route("/")
@@ -164,25 +116,25 @@ def login():
         password = request.form.get("password")
         remember = request.form.get("remember", False)
         
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE username = ?", (username,))
-        user = c.fetchone()
-        conn.close()
-        
-        if user and check_password_hash(user['password_hash'], password):
-            user_obj = User(user['id'], user['username'], user['email'], 
-                          user['password_hash'], user['role'], user['created_at'])
-            login_user(user_obj, remember=remember)
+        try:
+            response = supabase.table('users').select('*').eq('username', username).execute()
+            if response.data:
+                user = response.data[0]
+                if check_password_hash(user['password_hash'], password):
+                    user_obj = User(user['id'], user['username'], user['email'], 
+                                  user['password_hash'], user['role'], user['created_at'])
+                    login_user(user_obj, remember=remember)
+                    
+                    # Update theme preference
+                    session['theme'] = user.get('theme', 'dark')
+                    
+                    flash(f'Welcome back, {username}!', 'success')
+                    next_page = request.args.get('next')
+                    return redirect(next_page or url_for('dashboard'))
             
-            # Update theme preference
-            session['theme'] = user['theme'] if 'theme' in user.keys() and user['theme'] else 'dark'
-            
-            flash(f'Welcome back, {username}!', 'success')
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('dashboard'))
-        else:
             flash('Invalid username or password', 'error')
+        except Exception as e:
+            flash(f'Error: {str(e)}', 'error')
     
     return render_template("login.html", page='login')
 
@@ -205,28 +157,26 @@ def register():
             flash('Password must be at least 6 characters', 'error')
             return render_template("register.html")
         
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        # Check if user exists
-        c.execute("SELECT * FROM users WHERE username = ? OR email = ?", (username, email))
-        if c.fetchone():
-            flash('Username or email already exists', 'error')
-            conn.close()
-            return render_template("register.html")
-        
-        # Create new user
-        password_hash = generate_password_hash(password)
         try:
-            c.execute("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
-                      (username, email, password_hash))
-            conn.commit()
+            # Check if user exists
+            response = supabase.table('users').select('*').or_(f'username.eq.{username},email.eq.{email}').execute()
+            if response.data:
+                flash('Username or email already exists', 'error')
+                return render_template("register.html")
+            
+            # Create new user
+            password_hash = generate_password_hash(password)
+            user_data = {
+                "username": username,
+                "email": email,
+                "password_hash": password_hash,
+                "role": "user"
+            }
+            supabase.table('users').insert(user_data).execute()
             flash('Registration successful! Please login.', 'success')
             return redirect(url_for('login'))
         except Exception as e:
             flash(f'Error: {str(e)}', 'error')
-        finally:
-            conn.close()
     
     return render_template("register.html", page='register')
 
@@ -321,37 +271,52 @@ def bulk_scan():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Get statistics
-    c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = ? GROUP BY verdict", (current_user.id,))
-    stats = {row['verdict']: row['count'] for row in c.fetchall()}
-    
-    # Get recent scans
-    c.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10", (current_user.id,))
-    recent_scans = c.fetchall()
-    
-    # Get category stats
-    c.execute("SELECT category, COUNT(*) as count FROM scans WHERE user_id = ? GROUP BY category", (current_user.id,))
-    category_stats = {row['category']: row['count'] for row in c.fetchall()}
-    
-    # Get total scans
-    c.execute("SELECT COUNT(*) as total FROM scans WHERE user_id = ?", (current_user.id,))
-    total_scans = c.fetchone()['total']
-    
-    # Get favorite scans
-    c.execute("SELECT COUNT(*) as fav FROM scans WHERE user_id = ? AND favorite = 1", (current_user.id,))
-    favorite_count = c.fetchone()['fav']
-    
-    conn.close()
-    
-    return render_template("dashboard.html", page='dashboard', 
-                         stats=stats, 
-                         recent_scans=recent_scans,
-                         category_stats=category_stats,
-                         total_scans=total_scans,
-                         favorite_count=favorite_count)
+    try:
+        # Get statistics: verdict counts
+        scans_res = supabase.table('scans').select('verdict').eq('user_id', current_user.id).execute()
+        stats = {}
+        for row in scans_res.data:
+            v = row['verdict']
+            stats[v] = stats.get(v, 0) + 1
+        
+        # Get recent scans
+        recent_res = supabase.table('scans').select('*').eq('user_id', current_user.id).order('timestamp', desc=True).limit(10).execute()
+        recent_scans = recent_res.data
+        
+        # Get category stats
+        category_stats = {}
+        for row in scans_res.data:
+            # We already have all scans in scans_res.data, but wait, scans_res only selected verdict.
+            # Let's just fetch all needed columns in one go or do multiple queries if needed.
+            # Actually, for counts, multiple queries or one plus processing is fine.
+            pass
+        
+        # Re-fetch for category stats if needed or select more columns initially
+        full_scans_res = supabase.table('scans').select('verdict, category, favorite').eq('user_id', current_user.id).execute()
+        category_stats = {}
+        favorite_count = 0
+        for row in full_scans_res.data:
+            c = row['category']
+            category_stats[c] = category_stats.get(c, 0) + 1
+            if row['favorite']:
+                favorite_count += 1
+        
+        total_scans = len(full_scans_res.data)
+        
+        return render_template("dashboard.html", page='dashboard', 
+                             stats=stats, 
+                             recent_scans=recent_scans,
+                             category_stats=category_stats,
+                             total_scans=total_scans,
+                             favorite_count=favorite_count)
+    except Exception as e:
+        print(f"Error in dashboard: {e}")
+        return render_template("dashboard.html", page='dashboard', 
+                             stats={}, 
+                             recent_scans=[],
+                             category_stats={},
+                             total_scans=0,
+                             favorite_count=0)
 
 # History route with filters
 @app.route("/history")
@@ -365,98 +330,65 @@ def history():
     page = request.args.get('page', 1, type=int)
     per_page = 20
     
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    query = "SELECT * FROM scans WHERE user_id = ?"
-    params = [current_user.id]
-    
-    if search:
-        query += " AND url LIKE ?"
-        params.append(f'%{search}%')
-    if verdict_filter:
-        query += " AND verdict = ?"
-        params.append(verdict_filter)
-    if category_filter:
-        query += " AND category = ?"
-        params.append(category_filter)
-    if date_from:
-        query += " AND timestamp >= ?"
-        params.append(date_from)
-    if date_to:
-        query += " AND timestamp <= ?"
-        params.append(date_to)
-    
-    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-    params.extend([per_page, (page - 1) * per_page])
-    
-    c.execute(query, params)
-    rows = c.fetchall()
-    
-    # Get total count for pagination
-    count_query = "SELECT COUNT(*) FROM scans WHERE user_id = ?"
-    count_params = [current_user.id]
-    if search:
-        count_query += " AND url LIKE ?"
-        count_params.append(f'%{search}%')
-    if verdict_filter:
-        count_query += " AND verdict = ?"
-        count_params.append(verdict_filter)
-    if category_filter:
-        count_query += " AND category = ?"
-        count_params.append(category_filter)
-    if date_from:
-        count_query += " AND timestamp >= ?"
-        count_params.append(date_from)
-    if date_to:
-        count_query += " AND timestamp <= ?"
-        count_params.append(date_to)
-    
-    c.execute(count_query, count_params)
-    result = c.fetchone()
-    total = result[0] if result else 0
-    total_pages = (total + per_page - 1) // per_page
-    
-    conn.close()
-    
-    return render_template("history.html", 
-                         page='history',
-                         rows=rows, 
-                         search=search,
-                         verdict_filter=verdict_filter,
-                         category_filter=category_filter,
-                         date_from=date_from,
-                         date_to=date_to,
-                         current_page=page,
-                         total_pages=total_pages)
+    try:
+        query = supabase.table('scans').select('*', count='exact').eq('user_id', current_user.id)
+        
+        if search:
+            query = query.ilike('url', f'%{search}%')
+        if verdict_filter:
+            query = query.eq('verdict', verdict_filter)
+        if category_filter:
+            query = query.eq('category', category_filter)
+        if date_from:
+            query = query.gte('timestamp', date_from)
+        if date_to:
+            query = query.lte('timestamp', date_to)
+            
+        start = (page - 1) * per_page
+        end = start + per_page - 1
+        
+        response = query.order('timestamp', desc=True).range(start, end).execute()
+        rows = response.data
+        total = response.count
+        total_pages = (total + per_page - 1) // per_page if total else 0
+        
+        return render_template("history.html", 
+                             page='history',
+                             rows=rows, 
+                             search=search,
+                             verdict_filter=verdict_filter,
+                             category_filter=category_filter,
+                             date_from=date_from,
+                             date_to=date_to,
+                             current_page=page,
+                             total_pages=total_pages)
+    except Exception as e:
+        print(f"Error in history: {e}")
+        return render_template("history.html", page='history', rows=[], total_pages=0)
 
 # Toggle favorite
 @app.route("/toggle_favorite/<int:scan_id>")
 @login_required
 def toggle_favorite(scan_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM scans WHERE id = ? AND user_id = ?", (scan_id, current_user.id))
-    scan = c.fetchone()
-    
-    if scan:
-        new_favorite = 0 if scan['favorite'] else 1
-        c.execute("UPDATE scans SET favorite = ? WHERE id = ?", (new_favorite, scan_id))
-        conn.commit()
-    
-    conn.close()
+    try:
+        response = supabase.table('scans').select('favorite').eq('id', scan_id).eq('user_id', current_user.id).execute()
+        if response.data:
+            current_fav = response.data[0]['favorite']
+            new_fav = 0 if current_fav else 1
+            supabase.table('scans').update({"favorite": new_fav}).eq('id', scan_id).execute()
+    except Exception as e:
+        print(f"Error toggling favorite: {e}")
     return redirect(url_for('history'))
 
 # Delete scan
 @app.route("/delete_scan/<int:scan_id>")
 @login_required
 def delete_scan(scan_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE id = ? AND user_id = ?", (scan_id, current_user.id))
-    conn.commit()
-    conn.close()
-    flash('Scan deleted successfully', 'success')
+    try:
+        supabase.table('scans').delete().eq('id', scan_id).eq('user_id', current_user.id).execute()
+        flash('Scan deleted successfully', 'success')
+    except Exception as e:
+        flash(f'Error deleting scan: {str(e)}', 'error')
     return redirect(url_for('history'))
 
 # Profile route
@@ -469,44 +401,40 @@ def profile():
         current_password = request.form.get("current_password")
         new_password = request.form.get("new_password")
         
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        # Verify current password
-        c.execute("SELECT password_hash FROM users WHERE id = ?", (current_user.id,))
-        user = c.fetchone()
-        
-        if not check_password_hash(user['password_hash'], current_password):
-            flash('Current password is incorrect', 'error')
-            conn.close()
+        try:
+            # Verify current password
+            response = supabase.table('users').select('password_hash').eq('id', current_user.id).execute()
+            if not response.data or not check_password_hash(response.data[0]['password_hash'], current_password):
+                flash('Current password is incorrect', 'error')
+                return redirect(url_for('profile'))
+            
+            update_data = {}
+            # Update username/email
+            if username != current_user.username:
+                check_res = supabase.table('users').select('id').eq('username', username).neq('id', current_user.id).execute()
+                if check_res.data:
+                    flash('Username already exists', 'error')
+                    return redirect(url_for('profile'))
+                update_data['username'] = username
+            
+            if email != current_user.email:
+                check_res = supabase.table('users').select('id').eq('email', email).neq('id', current_user.id).execute()
+                if check_res.data:
+                    flash('Email already exists', 'error')
+                    return redirect(url_for('profile'))
+                update_data['email'] = email
+            
+            # Update password if provided
+            if new_password:
+                update_data['password_hash'] = generate_password_hash(new_password)
+            
+            if update_data:
+                supabase.table('users').update(update_data).eq('id', current_user.id).execute()
+                flash('Profile updated successfully', 'success')
+            
             return redirect(url_for('profile'))
-        
-        # Update username/email
-        if username != current_user.username:
-            c.execute("SELECT * FROM users WHERE username = ? AND id != ?", (username, current_user.id))
-            if c.fetchone():
-                flash('Username already exists', 'error')
-                conn.close()
-                return redirect(url_for('profile'))
-            c.execute("UPDATE users SET username = ? WHERE id = ?", (username, current_user.id))
-        
-        if email != current_user.email:
-            c.execute("SELECT * FROM users WHERE email = ? AND id != ?", (email, current_user.id))
-            if c.fetchone():
-                flash('Email already exists', 'error')
-                conn.close()
-                return redirect(url_for('profile'))
-            c.execute("UPDATE users SET email = ? WHERE id = ?", (email, current_user.id))
-        
-        # Update password if provided
-        if new_password:
-            password_hash = generate_password_hash(new_password)
-            c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, current_user.id))
-        
-        conn.commit()
-        conn.close()
-        flash('Profile updated successfully', 'success')
-        return redirect(url_for('profile'))
+        except Exception as e:
+            flash(f'Error updating profile: {str(e)}', 'error')
     
     return render_template("profile.html", page='profile')
 
@@ -516,15 +444,12 @@ def profile():
 def settings():
     if request.method == "POST":
         theme = request.form.get("theme")
-        
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("UPDATE users SET theme = ? WHERE id = ?", (theme, current_user.id))
-        conn.commit()
-        conn.close()
-        
-        session['theme'] = theme
-        flash('Settings saved successfully', 'success')
+        try:
+            supabase.table('users').update({"theme": theme}).eq('id', current_user.id).execute()
+            session['theme'] = theme
+            flash('Settings saved successfully', 'success')
+        except Exception as e:
+            flash(f'Error saving settings: {str(e)}', 'error')
         return redirect(url_for('settings'))
     
     return render_template("settings.html", page='settings')
@@ -551,64 +476,68 @@ def export_pdf():
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY timestamp DESC LIMIT 100", (current_user.id,))
-    rows = c.fetchall()
-    # Query summary stats while connection still open
-    c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = ? GROUP BY verdict", (current_user.id,))
-    stats = c.fetchall()
-    conn.close()
-
-    # Use a physical file in /tmp (BASE_DIR) instead of memory buffer for Vercel stability
-    pdf_path = os.path.join(BASE_DIR, f"scan_report_{current_user.id}.pdf")
-    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    # Title
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=30)
-    elements.append(Paragraph("QR Threat Detector - Scan Report", title_style))
-    elements.append(Spacer(1, 20))
-    
-    # Summary
-    summary = "<br/>".join([f"{row['verdict']}: {row['count']}" for row in stats])
-    elements.append(Paragraph(f"<b>Summary:</b><br/>{summary}", styles['Normal']))
-    elements.append(Spacer(1, 20))
-    
-    # Table
-    data = [['URL', 'Score', 'Verdict', 'Category', 'Timestamp']]
-    for row in rows:
-        data.append([row['url'][:50] + '...' if len(row['url']) > 50 else row['url'],
-                    str(row['score']), row['verdict'], row['category'], row['timestamp']])
-    
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    elements.append(table)
-    
-    doc.build(elements)
-    
-    # Read the file back into memory to stream safely on Vercel
-    with open(pdf_path, 'rb') as f:
-        pdf_bytes = f.read()
+    try:
+        # Fetch scans
+        rows_res = supabase.table('scans').select('*').eq('user_id', current_user.id).order('timestamp', desc=True).limit(100).execute()
+        rows = rows_res.data
         
-    from flask import Response
-    return Response(
-        pdf_bytes,
-        mimetype='application/pdf',
-        headers={
-            'Content-Disposition': f'attachment; filename=scan_report_{datetime.now().strftime("%Y%m%d")}.pdf'
-        }
-    )
+        # Calculate stats from rows
+        stats_dict = {}
+        for row in rows:
+            v = row['verdict']
+            stats_dict[v] = stats_dict.get(v, 0) + 1
+        
+        # Use a physical file in /tmp (BASE_DIR)
+        pdf_path = os.path.join(BASE_DIR, f"scan_report_{current_user.id}.pdf")
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=30)
+        elements.append(Paragraph("QR Threat Detector - Scan Report", title_style))
+        elements.append(Spacer(1, 20))
+        
+        # Summary
+        summary_text = "<br/>".join([f"{v}: {count}" for v, count in stats_dict.items()])
+        elements.append(Paragraph(f"<b>Summary:</b><br/>{summary_text}", styles['Normal']))
+        elements.append(Spacer(1, 20))
+        
+        # Table
+        data = [['URL', 'Score', 'Verdict', 'Category', 'Timestamp']]
+        for row in rows:
+            data.append([row['url'][:50] + '...' if len(row['url']) > 50 else row['url'],
+                        str(row['score']), row['verdict'], row['category'], row['timestamp']])
+        
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(table)
+        
+        doc.build(elements)
+        
+        with open(pdf_path, 'rb') as f:
+            pdf_bytes = f.read()
+            
+        from flask import Response
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename=scan_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+            }
+        )
+    except Exception as e:
+        flash(f"Error generating PDF: {str(e)}", "error")
+        return redirect(url_for('history'))
 
 # API Routes
 @app.route("/api/scan", methods=["POST"])
@@ -657,32 +586,39 @@ def api_scan_batch():
 @login_required
 @admin_required
 def admin():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Get all users
-    c.execute("SELECT * FROM users ORDER BY created_at DESC")
-    users = c.fetchall()
-    
-    # Get total scans
-    c.execute("SELECT COUNT(*) as total FROM scans")
-    total_scans = c.fetchone()['total']
-    
-    # Get scans today
-    c.execute("SELECT COUNT(*) as today FROM scans WHERE DATE(timestamp) = DATE('now')")
-    today_scans = c.fetchone()['today']
-    
-    # Get all scans (recent)
-    c.execute("SELECT scans.*, users.username FROM scans LEFT JOIN users ON scans.user_id = users.id ORDER BY scans.timestamp DESC LIMIT 50")
-    recent_all_scans = c.fetchall()
-    
-    conn.close()
-    
-    return render_template("admin.html", page='admin',
-                         users=users,
-                         total_scans=total_scans,
-                         today_scans=today_scans,
-                         recent_all_scans=recent_all_scans)
+    try:
+        # Get all users
+        users_res = supabase.table('users').select('*').order('created_at', desc=True).execute()
+        users = users_res.data
+        
+        # Get total scans
+        scans_count_res = supabase.table('scans').select('*', count='exact').execute()
+        total_scans = scans_count_res.count
+        
+        # Get scans today
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_scans_res = supabase.table('scans').select('*', count='exact').gte('timestamp', today).execute()
+        today_scans = today_scans_res.count
+        
+        # Get all scans (recent) and flatten the username
+        recent_res = supabase.table('scans').select('*, users(username)').order('timestamp', desc=True).limit(50).execute()
+        recent_all_scans = []
+        for scan in recent_res.data:
+            # Flatten users(username) into the scan dictionary
+            if 'users' in scan and scan['users']:
+                scan['username'] = scan['users'].get('username', 'Unknown')
+            else:
+                scan['username'] = 'Unknown'
+            recent_all_scans.append(scan)
+        
+        return render_template("admin.html", page='admin',
+                             users=users,
+                             total_scans=total_scans,
+                             today_scans=today_scans,
+                             recent_all_scans=recent_all_scans)
+    except Exception as e:
+        flash(f"Error in admin dashboard: {str(e)}", "error")
+        return redirect(url_for('dashboard'))
 
 @app.route("/admin/user/<int:user_id>/delete")
 @login_required
@@ -692,60 +628,38 @@ def delete_user(user_id):
         flash('Cannot delete your own account', 'error')
         return redirect(url_for('admin'))
     
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-    
-    flash('User deleted successfully', 'success')
+    try:
+        supabase.table('scans').delete().eq('user_id', user_id).execute()
+        supabase.table('users').delete().eq('id', user_id).execute()
+        flash('User deleted successfully', 'success')
+    except Exception as e:
+        flash(f'Error deleting user: {str(e)}', 'error')
+        
     return redirect(url_for('admin'))
 
 @app.route("/admin/scan/<int:scan_id>/delete")
 @login_required
 @admin_required
 def admin_delete_scan(scan_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
-    conn.commit()
-    conn.close()
-    flash('Scan deleted successfully', 'success')
+    try:
+        supabase.table('scans').delete().eq('id', scan_id).execute()
+        flash('Scan deleted successfully', 'success')
+    except Exception as e:
+        flash(f'Error deleting scan: {str(e)}', 'error')
     return redirect(url_for('admin'))
 
 @app.route("/admin/user/<int:user_id>/promote")
 @login_required
 @admin_required
 def promote_user(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-    flash('User promoted to admin', 'success')
+    try:
+        supabase.table('users').update({"role": "admin"}).eq('id', user_id).execute()
+        flash('User promoted to admin', 'success')
+    except Exception as e:
+        flash(f'Error promoting user: {str(e)}', 'error')
     return redirect(url_for('admin'))
 
-# Backup database
-@app.route("/backup_db")
-@login_required
-@admin_required
-def backup_db():
-    import shutil
-    from flask import Response
-    
-    # Read the DB bytes directly into memory
-    with open(DB_PATH, 'rb') as f:
-        db_bytes = f.read()
-        
-    # Send it directly as a raw response
-    return Response(
-        db_bytes,
-        mimetype='application/x-sqlite3',
-        headers={
-            'Content-Disposition': f'attachment; filename=backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
-        }
-    )
+# API Key management removed
 
 # API Key management removed
 
