@@ -115,7 +115,19 @@ def admin_required(f):
 
 # Helper functions
 def get_db_connection():
+    # In a serverless environment like Vercel, /tmp can be wiped at any time.
+    # If the user has an active session cookie but the DB was wiped, we need
+    # to recreate the tables before querying to prevent crashes.
     conn = sqlite3.connect(DB_PATH)
+    
+    # Quick check if tables exist, if not run init_db logic
+    c = conn.cursor()
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not c.fetchone():
+        conn.close()
+        init_db()
+        conn = sqlite3.connect(DB_PATH)
+        
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -548,8 +560,9 @@ def export_pdf():
     stats = c.fetchall()
     conn.close()
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    # Use a physical file in /tmp (BASE_DIR) instead of memory buffer for Vercel stability
+    pdf_path = os.path.join(BASE_DIR, f"scan_report_{current_user.id}.pdf")
+    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
     elements = []
     styles = getSampleStyleSheet()
     
@@ -583,13 +596,18 @@ def export_pdf():
     elements.append(table)
     
     doc.build(elements)
-    buffer.seek(0)
     
-    return send_file(
-        buffer,
+    # Read the file back into memory to stream safely on Vercel
+    with open(pdf_path, 'rb') as f:
+        pdf_bytes = f.read()
+        
+    from flask import Response
+    return Response(
+        pdf_bytes,
         mimetype='application/pdf',
-        as_attachment=True,
-        download_name=f'scan_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        headers={
+            'Content-Disposition': f'attachment; filename=scan_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        }
     )
 
 # API Routes
@@ -714,9 +732,20 @@ def promote_user(user_id):
 @admin_required
 def backup_db():
     import shutil
-    backup_path = os.path.join(BASE_DIR, "instance", f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
-    shutil.copy(DB_PATH, backup_path)
-    return send_file(backup_path, as_attachment=True)
+    from flask import Response
+    
+    # Read the DB bytes directly into memory
+    with open(DB_PATH, 'rb') as f:
+        db_bytes = f.read()
+        
+    # Send it directly as a raw response
+    return Response(
+        db_bytes,
+        mimetype='application/x-sqlite3',
+        headers={
+            'Content-Disposition': f'attachment; filename=backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
+        }
+    )
 
 # API Key management removed
 
