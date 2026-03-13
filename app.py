@@ -3,8 +3,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
 import io
 import csv
 import datetime
@@ -22,28 +21,23 @@ app.secret_key = "qr_threat_detector_secret_key_2024"
 BASE_DIR = "."
 UPLOAD_FOLDER = "static/uploads"
 REPORT_FOLDER = "static/reports"
+DB_PATH = "instance/database.db"
 
-# Supabase PostgreSQL Connection String
-# WARNING: Vercel does not support Supabase's new IPv6 direct connections (Port 5432).
-# We MUST use the IPv4 connection pooler on Port 6543 for Vercel Serverless.
-# The username MUST include the project ID suffix for pooling (e.g., postgres.projectid).
-# URL-encoded to handle special characters in the password (@ -> %40, # -> %23)
-DB_URL = "postgresql://postgres.eeloeocxzuaagnhmklmf:9S%40%23V8jP2cKL5mX%40@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-
-# For SQLAlchemy/Vercel compat, sometimes "postgres://" needs to be "postgresql://"
-if DB_URL.startswith("postgres://"):
-    DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 # Bulletproof check for Vercel/Read-Only filesystem
 try:
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(REPORT_FOLDER, exist_ok=True)
+    os.makedirs("instance", exist_ok=True)
 except (PermissionError, OSError):
     # If we get a permission error (e.g. on Vercel serverless), switch EVERYTHING to /tmp
     BASE_DIR = "/tmp"
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "static/uploads")
     REPORT_FOLDER = os.path.join(BASE_DIR, "static/reports")
+    DB_PATH = os.path.join(BASE_DIR, "instance/database.db")
+    
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(REPORT_FOLDER, exist_ok=True)
+    os.makedirs(os.path.join(BASE_DIR, "instance"), exist_ok=True)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -60,17 +54,12 @@ class User(UserMixin):
         self.role = role
         self.created_at = created_at
 
-# Helper functions
-def get_db_connection():
-    # Connect directly to the external Supabase Postgres database
-    conn = psycopg2.connect(DB_URL)
-    return conn
-
 @login_manager.user_loader
 def load_user(user_id):
-    conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     user = c.fetchone()
     conn.close()
     if user:
@@ -79,40 +68,40 @@ def load_user(user_id):
 
 # Database initialization
 def init_db():
-    conn = psycopg2.connect(DB_URL)
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
     # Users table
     c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id SERIAL PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, email TEXT UNIQUE, 
                   password_hash TEXT, role TEXT DEFAULT 'user', theme TEXT DEFAULT 'dark',
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                  created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
     
     # Scans table
     c.execute('''CREATE TABLE IF NOT EXISTS scans
-                 (id SERIAL PRIMARY KEY, user_id INTEGER, url TEXT, 
-                  score INTEGER, verdict TEXT, category TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, url TEXT, 
+                  score INTEGER, verdict TEXT, category TEXT, timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
                   favorite INTEGER DEFAULT 0, notes TEXT,
                   FOREIGN KEY(user_id) REFERENCES users(id))''')
     
+    # API keys table removed
+    
     # Settings table
     c.execute('''CREATE TABLE IF NOT EXISTS settings
-                 (id SERIAL PRIMARY KEY, user_id INTEGER, key TEXT, value TEXT,
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, key TEXT, value TEXT,
                   FOREIGN KEY(user_id) REFERENCES users(id))''')
     
     # Create default admin user if not exists
     c.execute("SELECT * FROM users WHERE username = 'admin'")
     if not c.fetchone():
         admin_hash = generate_password_hash("admin123")
-        c.execute("INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, %s)",
+        c.execute("INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                   ("admin", "admin@qrthreat.com", admin_hash, "admin"))
     
     conn.commit()
     conn.close()
 
-# We deliberately DO NOT call init_db() globally here anymore.
-# Vercel's serverless cold-boots will crash or hang trying to run DDL creation queries.
-# Tables MUST be created by pasting init_supabase.sql directly into the Supabase SQL editor.
+init_db()
 
 # Admin decorator
 def admin_required(f):
@@ -124,14 +113,32 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# Helper functions
+def get_db_connection():
+    # In a serverless environment like Vercel, /tmp can be wiped at any time.
+    # If the user has an active session cookie but the DB was wiped, we need
+    # to recreate the tables before querying to prevent crashes.
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Quick check if tables exist, if not run init_db logic
+    c = conn.cursor()
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not c.fetchone():
+        conn.close()
+        init_db()
+        conn = sqlite3.connect(DB_PATH)
+        
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def log_scan(user_id, url, risk, category='general'):
     conn = get_db_connection()
     c = conn.cursor()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("INSERT INTO scans (user_id, url, score, verdict, category, timestamp) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+    c.execute("INSERT INTO scans (user_id, url, score, verdict, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
               (user_id, url, risk['score'], risk['verdict'], category, timestamp))
-    scan_id = c.fetchone()[0]
     conn.commit()
+    scan_id = c.lastrowid
     conn.close()
     return scan_id
 
@@ -158,8 +165,8 @@ def login():
         remember = request.form.get("remember", False)
         
         conn = get_db_connection()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT * FROM users WHERE username = %s", (username,))
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username = ?", (username,))
         user = c.fetchone()
         conn.close()
         
@@ -198,11 +205,11 @@ def register():
             flash('Password must be at least 6 characters', 'error')
             return render_template("register.html")
         
-        conn = get_db_connection_safe()
-        c = conn.cursor(cursor_factory=RealDictCursor)
+        conn = get_db_connection()
+        c = conn.cursor()
         
         # Check if user exists
-        c.execute("SELECT * FROM users WHERE username = %s OR email = %s", (username, email))
+        c.execute("SELECT * FROM users WHERE username = ? OR email = ?", (username, email))
         if c.fetchone():
             flash('Username or email already exists', 'error')
             conn.close()
@@ -211,7 +218,7 @@ def register():
         # Create new user
         password_hash = generate_password_hash(password)
         try:
-            c.execute("INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s)",
+            c.execute("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
                       (username, email, password_hash))
             conn.commit()
             flash('Registration successful! Please login.', 'success')
@@ -315,29 +322,27 @@ def bulk_scan():
 @login_required
 def dashboard():
     conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
+    c = conn.cursor()
     
     # Get statistics
-    c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY verdict", (current_user.id,))
+    c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = ? GROUP BY verdict", (current_user.id,))
     stats = {row['verdict']: row['count'] for row in c.fetchall()}
     
     # Get recent scans
-    c.execute("SELECT * FROM scans WHERE user_id = %s ORDER BY timestamp DESC LIMIT 10", (current_user.id,))
+    c.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10", (current_user.id,))
     recent_scans = c.fetchall()
     
     # Get category stats
-    c.execute("SELECT category, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY category", (current_user.id,))
+    c.execute("SELECT category, COUNT(*) as count FROM scans WHERE user_id = ? GROUP BY category", (current_user.id,))
     category_stats = {row['category']: row['count'] for row in c.fetchall()}
     
     # Get total scans
-    c.execute("SELECT COUNT(*) as total FROM scans WHERE user_id = %s", (current_user.id,))
-    total_result = c.fetchone()
-    total_scans = total_result['total'] if total_result else 0
+    c.execute("SELECT COUNT(*) as total FROM scans WHERE user_id = ?", (current_user.id,))
+    total_scans = c.fetchone()['total']
     
     # Get favorite scans
-    c.execute("SELECT COUNT(*) as fav FROM scans WHERE user_id = %s AND favorite = 1", (current_user.id,))
-    fav_result = c.fetchone()
-    favorite_count = fav_result['fav'] if fav_result else 0
+    c.execute("SELECT COUNT(*) as fav FROM scans WHERE user_id = ? AND favorite = 1", (current_user.id,))
+    favorite_count = c.fetchone()['fav']
     
     conn.close()
     
@@ -361,55 +366,55 @@ def history():
     per_page = 20
     
     conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
+    c = conn.cursor()
     
-    query = "SELECT * FROM scans WHERE user_id = %s"
+    query = "SELECT * FROM scans WHERE user_id = ?"
     params = [current_user.id]
     
     if search:
-        query += " AND url LIKE %s"
+        query += " AND url LIKE ?"
         params.append(f'%{search}%')
     if verdict_filter:
-        query += " AND verdict = %s"
+        query += " AND verdict = ?"
         params.append(verdict_filter)
     if category_filter:
-        query += " AND category = %s"
+        query += " AND category = ?"
         params.append(category_filter)
     if date_from:
-        query += " AND timestamp >= %s"
+        query += " AND timestamp >= ?"
         params.append(date_from)
     if date_to:
-        query += " AND timestamp <= %s"
+        query += " AND timestamp <= ?"
         params.append(date_to)
     
-    query += " ORDER BY timestamp DESC LIMIT %s OFFSET %s"
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
     params.extend([per_page, (page - 1) * per_page])
     
     c.execute(query, params)
     rows = c.fetchall()
     
     # Get total count for pagination
-    count_query = "SELECT COUNT(*) as total FROM scans WHERE user_id = %s"
+    count_query = "SELECT COUNT(*) FROM scans WHERE user_id = ?"
     count_params = [current_user.id]
     if search:
-        count_query += " AND url LIKE %s"
+        count_query += " AND url LIKE ?"
         count_params.append(f'%{search}%')
     if verdict_filter:
-        count_query += " AND verdict = %s"
+        count_query += " AND verdict = ?"
         count_params.append(verdict_filter)
     if category_filter:
-        count_query += " AND category = %s"
+        count_query += " AND category = ?"
         count_params.append(category_filter)
     if date_from:
-        count_query += " AND timestamp >= %s"
+        count_query += " AND timestamp >= ?"
         count_params.append(date_from)
     if date_to:
-        count_query += " AND timestamp <= %s"
+        count_query += " AND timestamp <= ?"
         count_params.append(date_to)
     
     c.execute(count_query, count_params)
     result = c.fetchone()
-    total = result['total'] if result else 0
+    total = result[0] if result else 0
     total_pages = (total + per_page - 1) // per_page
     
     conn.close()
@@ -430,13 +435,13 @@ def history():
 @login_required
 def toggle_favorite(scan_id):
     conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute("SELECT * FROM scans WHERE id = %s AND user_id = %s", (scan_id, current_user.id))
+    c = conn.cursor()
+    c.execute("SELECT * FROM scans WHERE id = ? AND user_id = ?", (scan_id, current_user.id))
     scan = c.fetchone()
     
     if scan:
         new_favorite = 0 if scan['favorite'] else 1
-        c.execute("UPDATE scans SET favorite = %s WHERE id = %s", (new_favorite, scan_id))
+        c.execute("UPDATE scans SET favorite = ? WHERE id = ?", (new_favorite, scan_id))
         conn.commit()
     
     conn.close()
@@ -448,7 +453,7 @@ def toggle_favorite(scan_id):
 def delete_scan(scan_id):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE id = %s AND user_id = %s", (scan_id, current_user.id))
+    c.execute("DELETE FROM scans WHERE id = ? AND user_id = ?", (scan_id, current_user.id))
     conn.commit()
     conn.close()
     flash('Scan deleted successfully', 'success')
@@ -465,10 +470,10 @@ def profile():
         new_password = request.form.get("new_password")
         
         conn = get_db_connection()
-        c = conn.cursor(cursor_factory=RealDictCursor)
+        c = conn.cursor()
         
         # Verify current password
-        c.execute("SELECT password_hash FROM users WHERE id = %s", (current_user.id,))
+        c.execute("SELECT password_hash FROM users WHERE id = ?", (current_user.id,))
         user = c.fetchone()
         
         if not check_password_hash(user['password_hash'], current_password):
@@ -478,25 +483,25 @@ def profile():
         
         # Update username/email
         if username != current_user.username:
-            c.execute("SELECT * FROM users WHERE username = %s AND id != %s", (username, current_user.id))
+            c.execute("SELECT * FROM users WHERE username = ? AND id != ?", (username, current_user.id))
             if c.fetchone():
                 flash('Username already exists', 'error')
                 conn.close()
                 return redirect(url_for('profile'))
-            c.execute("UPDATE users SET username = %s WHERE id = %s", (username, current_user.id))
+            c.execute("UPDATE users SET username = ? WHERE id = ?", (username, current_user.id))
         
         if email != current_user.email:
-            c.execute("SELECT * FROM users WHERE email = %s AND id != %s", (email, current_user.id))
+            c.execute("SELECT * FROM users WHERE email = ? AND id != ?", (email, current_user.id))
             if c.fetchone():
                 flash('Email already exists', 'error')
                 conn.close()
                 return redirect(url_for('profile'))
-            c.execute("UPDATE users SET email = %s WHERE id = %s", (email, current_user.id))
+            c.execute("UPDATE users SET email = ? WHERE id = ?", (email, current_user.id))
         
         # Update password if provided
         if new_password:
             password_hash = generate_password_hash(new_password)
-            c.execute("UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, current_user.id))
+            c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, current_user.id))
         
         conn.commit()
         conn.close()
@@ -689,8 +694,8 @@ def delete_user(user_id):
     
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE user_id = %s", (user_id,))
-    c.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    c.execute("DELETE FROM scans WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
     
@@ -703,7 +708,7 @@ def delete_user(user_id):
 def admin_delete_scan(scan_id):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM scans WHERE id = %s", (scan_id,))
+    c.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
     conn.commit()
     conn.close()
     flash('Scan deleted successfully', 'success')
@@ -715,7 +720,7 @@ def admin_delete_scan(scan_id):
 def promote_user(user_id):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("UPDATE users SET role = 'admin' WHERE id = %s", (user_id,))
+    c.execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
     flash('User promoted to admin', 'success')
@@ -726,45 +731,19 @@ def promote_user(user_id):
 @login_required
 @admin_required
 def backup_db():
+    import shutil
     from flask import Response
     
-    # PostgreSQL cannot be copied as a file like SQLite.
-    # To backup a Postgres DB natively on a Vercel runtime (no pg_dump),
-    # we export key tables to a CSV as a lightweight backup.
-    
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Create an in-memory string buffer for CSV
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    # Backup Users
-    writer.writerow(['--- USERS ---'])
-    c.execute("SELECT * FROM users")
-    users = c.fetchall()
-    if users:
-        writer.writerow([i[0] for i in c.description]) # headers
-        writer.writerows(users)
-    
-    # Backup Scans
-    writer.writerow(['\n--- SCANS ---'])
-    c.execute("SELECT * FROM scans")
-    scans = c.fetchall()
-    if scans:
-        writer.writerow([i[0] for i in c.description]) # headers
-        writer.writerows(scans)
-    
-    conn.close()
-    
-    # Get bytes
-    backup_data = output.getvalue().encode('utf-8')
-    
+    # Read the DB bytes directly into memory
+    with open(DB_PATH, 'rb') as f:
+        db_bytes = f.read()
+        
+    # Send it directly as a raw response
     return Response(
-        backup_data,
-        mimetype='text/csv',
+        db_bytes,
+        mimetype='application/x-sqlite3',
         headers={
-            'Content-Disposition': f'attachment; filename=postgres_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+            'Content-Disposition': f'attachment; filename=backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
         }
     )
 
@@ -780,7 +759,7 @@ def toggle_theme():
     if current_user.is_authenticated:
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("UPDATE users SET theme = %s WHERE id = %s", (new_theme, current_user.id))
+        c.execute("UPDATE users SET theme = ? WHERE id = ?", (new_theme, current_user.id))
         conn.commit()
         conn.close()
     
