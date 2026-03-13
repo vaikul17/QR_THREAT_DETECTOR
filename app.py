@@ -26,8 +26,9 @@ REPORT_FOLDER = "static/reports"
 # Supabase PostgreSQL Connection String
 # WARNING: Vercel does not support Supabase's new IPv6 direct connections (Port 5432).
 # We MUST use the IPv4 connection pooler on Port 6543 for Vercel Serverless.
+# The username MUST include the project ID suffix for pooling (e.g., postgres.projectid).
 # URL-encoded to handle special characters in the password (@ -> %40, # -> %23)
-DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+DB_URL = "postgresql://postgres.eeloeocxzuaagnhmklmf:9S%40%23V8jP2cKL5mX%40@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 # For SQLAlchemy/Vercel compat, sometimes "postgres://" needs to be "postgresql://"
 if DB_URL.startswith("postgres://"):
