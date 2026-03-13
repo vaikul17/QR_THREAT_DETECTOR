@@ -792,7 +792,10 @@ def not_found(e):
 
 @app.errorhandler(500)
 def server_error(e):
-    return render_template("error.html", error="Internal server error"), 500
+    # TEMPORARY LOGGING: Return the exact exception string to the screen 
+    # to bypass Vercel's logging limitations.
+    import traceback
+    return f"<h1>Internal Server Error</h1><pre>{str(e)}</pre>", 500
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
