@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Threat Detector - Scan QR Codes</title>
+    <meta name="description" content="Scan QR codes instantly to detect phishing, malicious URLs, and security threats before they can harm you.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Floating Particles -->
+    <div class="particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar glass-card">
+        <a href="/" class="navbar-brand">
+            <i class="fas fa-shield-halved"></i> QR Threat Detector
+        </a>
+        <ul class="navbar-nav">
+            {% if current_user.is_authenticated %}
+            <li><a href="{{ url_for('dashboard') }}" class="nav-link {% if page=='dashboard' %}active{% endif %}">
+                <i class="fas fa-chart-pie"></i> Dashboard
+            </a></li>
+            <li><a href="{{ url_for('scan') }}" class="nav-link {% if page=='scan' %}active{% endif %}">
+                <i class="fas fa-qrcode"></i> Scan
+            </a></li>
+            <li><a href="{{ url_for('history') }}" class="nav-link {% if page=='history' %}active{% endif %}">
+                <i class="fas fa-history"></i> History
+            </a></li>
+            <li><a href="{{ url_for('generate_qr') }}" class="nav-link {% if page=='generate_qr' %}active{% endif %}">
+                <i class="fas fa-qrcode"></i> Generate QR
+            </a></li>
+            <li><a href="{{ url_for('profile') }}" class="nav-link {% if page=='profile' %}active{% endif %}">
+                <i class="fas fa-user"></i> Profile
+            </a></li>
+            <li><a href="{{ url_for('logout') }}" class="nav-link">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a></li>
+            {% else %}
+            <li><a href="{{ url_for('login') }}" class="nav-link">
+                <i class="fas fa-sign-in-alt"></i> Login
+            </a></li>
+            <li><a href="{{ url_for('register') }}" class="nav-link">
+                <i class="fas fa-user-plus"></i> Register
+            </a></li>
+            {% endif %}
+        </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mt-5">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="toast-container">
+                    {% for category, message in messages %}
+                    <div class="toast toast-{{ category }}">
+                        <i class="fas fa-{% if category=='success' %}check-circle{% elif category=='error' %}exclamation-circle{% elif category=='warning' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+                        {{ message }}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if not current_user.is_authenticated %}
+        <!-- Hero Section -->
+        <div class="hero">
+            <div class="hero-content">
+                <h1 class="hero-title">Protect Yourself from<br>QR Code Threats</h1>
+                <p class="hero-subtitle">
+                    Scan QR codes instantly and detect phishing attempts, malicious URLs, and potential security threats 
+                    before they can harm you or your organization.
+                </p>
+                <div class="hero-buttons">
+                    <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">
+                        <i class="fas fa-rocket"></i> Get Started Free
+                    </a>
+                    <a href="{{ url_for('login') }}" class="btn btn-secondary btn-lg">
+                        <i class="fas fa-sign-in-alt"></i> Login
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- How It Works Section -->
+        <section class="how-it-works">
+            <div class="text-center">
+                <h2 class="section-title">How It Works</h2>
+                <p class="section-subtitle">Three simple steps to stay safe from malicious QR codes</p>
+            </div>
+            <div class="how-it-works-grid">
+                <div class="glass-card step-card">
+                    <div class="step-number">1</div>
+                    <h3 class="step-title">Upload or Scan</h3>
+                    <p class="step-desc">Upload a QR code image, use your camera, or paste a URL directly.</p>
+                </div>
+                <div class="glass-card step-card">
+                    <div class="step-number">2</div>
+                    <h3 class="step-title">AI Analyzes</h3>
+                    <p class="step-desc">Our AI engine checks for phishing, malware, suspicious patterns and more.</p>
+                </div>
+                <div class="glass-card step-card">
+                    <div class="step-number">3</div>
+                    <h3 class="step-title">Get Results</h3>
+                    <p class="step-desc">Receive a detailed threat report with risk score and safety verdict.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features">
+            <div class="text-center">
+                <h2 class="section-title">Why Choose QR Threat Detector?</h2>
+                <p class="section-subtitle">Enterprise-grade security made simple for everyone</p>
+            </div>
+            <div class="features-grid">
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3 class="feature-title">Real-Time Scanning</h3>
+                    <p class="feature-description">
+                        Instant QR code analysis with detailed threat reports in milliseconds.
+                    </p>
+                </div>
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h3 class="feature-title">AI-Powered Detection</h3>
+                    <p class="feature-description">
+                        Advanced machine learning algorithms identify even the most sophisticated threats.
+                    </p>
+                </div>
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3 class="feature-title">Detailed Analytics</h3>
+                    <p class="feature-description">
+                        Track scanning history with comprehensive reports and visualizations.
+                    </p>
+                </div>
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-mobile-alt"></i>
+                    </div>
+                    <h3 class="feature-title">Mobile Friendly</h3>
+                    <p class="feature-description">
+                        Scan QR codes directly from your camera on any device.
+                    </p>
+                </div>
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                    <h3 class="feature-title">Privacy First</h3>
+                    <p class="feature-description">
+                        Your data is encrypted and never shared with third parties.
+                    </p>
+                </div>
+                <div class="glass-card feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <h3 class="feature-title">24/7 Protection</h3>
+                    <p class="feature-description">
+                        Continuous monitoring and updates against emerging threats.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        {% else %}
+        <!-- Scan Interface for Authenticated Users -->
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h2 class="card-title text-center">
+                            <i class="fas fa-qrcode"></i> Scan QR Code
+                        </h2>
+                    </div>
+                    
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('upload')">
+                            <i class="fas fa-upload"></i> Upload
+                        </button>
+                        <button class="tab" onclick="switchTab('camera')">
+                            <i class="fas fa-camera"></i> Camera
+                        </button>
+                        <button class="tab" onclick="switchTab('url')">
+                            <i class="fas fa-link"></i> URL
+                        </button>
+                    </div>
+
+                    <!-- Upload Tab -->
+                    <div id="upload-tab" class="tab-content">
+                        <form method="POST" enctype="multipart/form-data" id="scan-form">
+                            <div class="upload-area" id="drop-zone">
+                                <input type="file" name="qr" id="qr-file" accept="image/*" style="display: none;">
+                                <!-- Preview image (hidden when none) -->
+                                <img id="uploaded-preview" src="" alt="Uploaded QR" style="max-width:100%; max-height:320px; display: none; object-fit:contain; margin-bottom:8px;"/>
+                                <div class="upload-icon" id="upload-icon">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                </div>
+                                <h4 id="upload-text">Drag & Drop QR Code Here</h4>
+                                <p class="text-muted">or click to browse</p>
+                                <p class="text-muted mt-2">Supports: PNG, JPG, JPEG, BMP</p>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 mt-3">
+                                <i class="fas fa-search"></i> Scan QR Code
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Camera Tab -->
+                    <div id="camera-tab" class="tab-content" style="display: none;">
+                        <div class="scanner-container">
+                            <video id="scanner-video" class="scanner-video" autoplay playsinline></video>
+                            <div class="scanner-overlay"></div>
+                        </div>
+                        <button class="btn btn-primary w-100 mt-3" id="start-scan">
+                            <i class="fas fa-camera"></i> Start Camera Scan
+                        </button>
+                        <button class="btn btn-danger w-100 mt-2" id="stop-scan" style="display: none;">
+                            <i class="fas fa-stop"></i> Stop Camera
+                        </button>
+                    </div>
+
+                    <!-- URL Tab -->
+                    <div id="url-tab" class="tab-content" style="display: none;">
+                        <form method="POST">
+                            <div class="form-group">
+                                <label class="form-label">Enter URL to Scan</label>
+                                <input type="url" name="url_input" class="form-control" 
+                                       placeholder="https://example.com" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-search"></i> Analyze URL
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Scan Result -->
+                {% if result %}
+                <div class="glass-card scan-result">
+                    <div class="text-center mb-4">
+                        <h3>Scan Results</h3>
+                        <p class="text-muted">{{ result.timestamp }}</p>
+                    </div>
+                    
+                    <div class="scan-url">
+                        <strong>URL:</strong> {{ result.url }}
+                    </div>
+
+                    <div class="mt-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span>Threat Level</span>
+                            <span class="badge {% if result.risk.verdict=='Safe' %}badge-safe{% elif result.risk.verdict=='Suspicious' %}badge-suspicious{% else %}badge-malicious{% endif %}">
+                                {{ result.risk.verdict }}
+                            </span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar {% if result.risk.verdict=='Safe' %}progress-bar-safe{% elif result.risk.verdict=='Suspicious' %}progress-bar-suspicious{% else %}progress-bar-malicious{% endif %}" 
+                                 style="width: {{ result.risk.score }}%">
+                                {{ result.risk.score }}%
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if result.analysis %}
+                    <div class="mt-4">
+                        <h5>Analysis Details</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <ul class="list-group">
+                                    {% if result.analysis.uses_http %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-suspicious">
+                                        Uses HTTP (Not Secure)
+                                        <span class="badge badge-suspicious">High Risk</span>
+                                    </li>
+                                    {% endif %}
+                                    {% if result.analysis.has_ip %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-malicious">
+                                        Contains IP Address
+                                        <span class="badge badge-malicious">Critical</span>
+                                    </li>
+                                    {% endif %}
+                                    {% if result.analysis.long_url %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-suspicious">
+                                        Long URL
+                                        <span class="badge badge-suspicious">Medium Risk</span>
+                                    </li>
+                                    {% endif %}
+                                    {% if result.analysis.many_dots %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-suspicious">
+                                        Many Subdomains
+                                        <span class="badge badge-suspicious">Medium Risk</span>
+                                    </li>
+                                    {% endif %}
+                                    {% if result.analysis.has_at %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-malicious">
+                                        Contains @ Symbol
+                                        <span class="badge badge-malicious">Critical</span>
+                                    </li>
+                                    {% endif %}
+                                    {% if result.analysis.has_https %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center threat-bg-safe">
+                                        Uses HTTPS (Secure)
+                                        <span class="badge badge-safe">Safe</span>
+                                    </li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div class="mt-4 d-flex gap-2">
+                        <a href="{{ url_for('history') }}" class="btn btn-secondary">
+                            <i class="fas fa-history"></i> View History
+                        </a>
+                        <a href="{{ url_for('scan') }}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Scan Another
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 QR Threat Detector. All rights reserved.</p>
+            <p class="text-muted">
+                <i class="fas fa-shield-alt"></i> Protecting your digital security
+            </p>
+            <div class="footer-social">
+                <a href="#" title="Twitter"><i class="fab fa-twitter"></i></a>
+                <a href="#" title="GitHub"><i class="fab fa-github"></i></a>
+                <a href="#" title="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.style.display = 'none');
+            
+            event.target.closest('.tab').classList.add('active');
+            document.getElementById(tabName + '-tab').style.display = 'block';
+        }
+
+        // File upload
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('qr-file');
+        const previewImg = document.getElementById('uploaded-preview');
+        const uploadIcon = document.getElementById('upload-icon');
+        const uploadText = document.getElementById('upload-text');
+
+        if (dropZone) {
+            dropZone.addEventListener('click', () => fileInput.click());
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    const file = files[0];
+                    const url = URL.createObjectURL(file);
+                    previewImg.src = url;
+                    previewImg.style.display = 'block';
+                    uploadIcon.style.display = 'none';
+                    uploadText.style.display = 'none';
+                }
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files && fileInput.files[0]) {
+                    const file = fileInput.files[0];
+                    const url = URL.createObjectURL(file);
+                    previewImg.src = url;
+                    previewImg.style.display = 'block';
+                    uploadIcon.style.display = 'none';
+                    uploadText.style.display = 'none';
+                }
+            });
+        }
+
+        // If server returned a result with uploaded file, show it
+        window.addEventListener('load', () => {
+            {% if result and result.uploaded_file %}
+            try {
+                previewImg.src = "{{ result.uploaded_file }}";
+                previewImg.style.display = 'block';
+                uploadIcon.style.display = 'none';
+                uploadText.style.display = 'none';
+            } catch (e) {
+                console.warn('Could not show uploaded preview', e);
+            }
+            {% endif %}
+        });
+
+        // Camera scanning
+        const startBtn = document.getElementById('start-scan');
+        const stopBtn = document.getElementById('stop-scan');
+        const video = document.getElementById('scanner-video');
+        let stream = null;
+
+        if (startBtn) {
+            startBtn.addEventListener('click', async () => {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: 'environment' } 
+                    });
+                    video.srcObject = stream;
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'block';
+                } catch (err) {
+                    alert('Camera access denied or not available');
+                }
+            });
+
+            stopBtn.addEventListener('click', () => {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                video.srcObject = null;
+                startBtn.style.display = 'block';
+                stopBtn.style.display = 'none';
+            });
+        }
+
+        // Auto-hide toasts
+        setTimeout(() => {
+            document.querySelectorAll('.toast').forEach(toast => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            });
+        }, 5000);
+
+        // Scroll reveal
+        const revealElements = document.querySelectorAll('.reveal');
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+        revealElements.forEach(el => revealObserver.observe(el));
+    </script>
+</body>
+</html>

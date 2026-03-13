@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History - QR Threat Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar glass-card">
+        <a href="/" class="navbar-brand">
+            <i class="fas fa-shield-halved"></i> QR Threat Detector
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="{{ url_for('dashboard') }}" class="nav-link {% if page=='dashboard' %}active{% endif %}">
+                <i class="fas fa-chart-pie"></i> Dashboard
+            </a></li>
+            <li><a href="{{ url_for('scan') }}" class="nav-link {% if page=='scan' %}active{% endif %}">
+                <i class="fas fa-qrcode"></i> Scan
+            </a></li>
+            <li><a href="{{ url_for('bulk_scan') }}" class="nav-link {% if page=='bulk_scan' %}active{% endif %}">
+                <i class="fas fa-layer-group"></i> Bulk Scan
+            </a></li>
+            <li><a href="{{ url_for('history') }}" class="nav-link {% if page=='history' %}active{% endif %}">
+                <i class="fas fa-history"></i> History
+            </a></li>
+            <li><a href="{{ url_for('generate_qr') }}" class="nav-link {% if page=='generate_qr' %}active{% endif %}">
+                <i class="fas fa-qrcode"></i> Generate QR
+            </a></li>
+            {% if current_user.role == 'admin' %}
+            <li><a href="{{ url_for('admin') }}" class="nav-link {% if page=='admin' %}active{% endif %}">
+                <i class="fas fa-cog"></i> Admin
+            </a></li>
+            {% endif %}
+            <li class="dropdown">
+                <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="fas fa-user-circle"></i> {{ current_user.username }}
+                </a>
+                <ul class="dropdown-menu" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+                    <li><a class="dropdown-item" href="{{ url_for('profile') }}" style="color: var(--text-primary);">
+                        <i class="fas fa-user"></i> Profile
+                    </a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('settings') }}" style="color: var(--text-primary);">
+                        <i class="fas fa-cog"></i> Settings
+                    </a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="{{ url_for('logout') }}" style="color: var(--accent-danger);">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a></li>
+                </ul>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="container mt-5">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="toast-container">
+                    {% for category, message in messages %}
+                    <div class="toast toast-{{ category }}">
+                        <i class="fas fa-{% if category=='success' %}check-circle{% elif category=='error' %}exclamation-circle{% else %}info-circle{% endif %}"></i>
+                        {{ message }}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-history"></i> Scan History</h2>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('export_pdf') }}" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-file-pdf"></i> Export PDF
+                </a>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <form method="GET" class="d-flex gap-2 flex-wrap w-100">
+                <div class="filter-group">
+                    <input type="text" name="search" class="form-control" placeholder="Search URLs..." 
+                           value="{{ search }}" style="width: 200px;">
+                </div>
+                <div class="filter-group">
+                    <select name="verdict" class="form-control" style="width: 150px;">
+                        <option value="">All Verdict</option>
+                        <option value="Safe" {% if verdict_filter=='Safe' %}selected{% endif %}>Safe</option>
+                        <option value="Suspicious" {% if verdict_filter=='Suspicious' %}selected{% endif %}>Suspicious</option>
+                        <option value="Malicious" {% if verdict_filter=='Malicious' %}selected{% endif %}>Malicious</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <select name="category" class="form-control" style="width: 150px;">
+                        <option value="">All Categories</option>
+                        <option value="general" {% if category_filter=='general' %}selected{% endif %}>General</option>
+                        <option value="bulk" {% if category_filter=='bulk' %}selected{% endif %}>Bulk</option>
+                        <option value="api" {% if category_filter=='api' %}selected{% endif %}>API</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <input type="date" name="date_from" class="form-control" 
+                           value="{{ date_from }}" placeholder="From" style="width: 140px;">
+                </div>
+                <div class="filter-group">
+                    <input type="date" name="date_to" class="form-control" 
+                           value="{{ date_to }}" placeholder="To" style="width: 140px;">
+                </div>
+                <div class="filter-group">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search"></i> Filter
+                    </button>
+                    <a href="{{ url_for('history') }}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Table -->
+        <div class="glass-card">
+            <div class="table-container" style="background: transparent; border: none;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>URL</th>
+                            <th>Verdict</th>
+                            <th>Score</th>
+                            <th>Category</th>
+                            <th>Timestamp</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if rows %}
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.id }}</td>
+                            <td>
+                                <span style="max-width: 300px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
+                                      title="{{ row.url }}">
+                                    {{ row.url }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge {% if row.verdict=='Safe' %}badge-safe{% elif row.verdict=='Suspicious' %}badge-suspicious{% else %}badge-malicious{% endif %}">
+                                    {{ row.verdict }}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="progress" style="width: 80px; height: 8px;">
+                                    <div class="progress-bar {% if row.verdict=='Safe' %}progress-bar-safe{% elif row.verdict=='Suspicious' %}progress-bar-suspicious{% else %}progress-bar-malicious{% endif %}" 
+                                         style="width: {{ row.score }}%"></div>
+                                </div>
+                                <small>{{ row.score }}%</small>
+                            </td>
+                            <td>{{ row.category }}</td>
+                            <td>{{ row.timestamp }}</td>
+                            <td>
+                                          <a href="{{ url_for('toggle_favorite', scan_id=row.id) }}" 
+                                              class="btn btn-sm {% if row.favorite %}btn-warning{% else %}btn-secondary{% endif %}"
+                                              title="{% if row.favorite %}Remove from favorites{% else %}Add to favorites{% endif %}">
+                                    <i class="fas fa-heart"></i>
+                                </a>
+                                <a href="{{ url_for('delete_scan', scan_id=row.id) }}" 
+                                   class="btn btn-sm btn-danger" 
+                                   onclick="return confirm('Are you sure you want to delete this scan?');"
+                                   title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-5">
+                                <i class="fas fa-inbox" style="font-size: 3rem;"></i>
+                                <p class="mt-3">No scans found matching your criteria.</p>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        {% if total_pages > 1 %}
+        <div class="pagination">
+            {% if current_page > 1 %}
+            <a href="{{ url_for('history', page=current_page-1, search=search, verdict=verdict_filter, category=category_filter, date_from=date_from, date_to=date_to) }}" 
+               class="page-link">
+                <i class="fas fa-chevron-left"></i> Previous
+            </a>
+            {% endif %}
+            
+            {% for p in range(1, total_pages + 1) %}
+                {% if p >= current_page - 2 and p <= current_page + 2 %}
+                <a href="{{ url_for('history', page=p, search=search, verdict=verdict_filter, category=category_filter, date_from=date_from, date_to=date_to) }}" 
+                   class="page-link {% if p == current_page %}active{% endif %}">
+                    {{ p }}
+                </a>
+                {% endif %}
+            {% endfor %}
+            
+            {% if current_page < total_pages %}
+            <a href="{{ url_for('history', page=current_page+1, search=search, verdict=verdict_filter, category=category_filter, date_from=date_from, date_to=date_to) }}" 
+               class="page-link">
+                Next <i class="fas fa-chevron-right"></i>
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 QR Threat Detector. All rights reserved.</p>
+            <p class="text-muted"><i class="fas fa-shield-alt"></i> Protecting your digital security</p>
+            <div class="footer-social">
+                <a href="#" title="Twitter"><i class="fab fa-twitter"></i></a>
+                <a href="#" title="GitHub"><i class="fab fa-github"></i></a>
+                <a href="#" title="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        setTimeout(() => {
+            document.querySelectorAll('.toast').forEach(toast => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            });
+        }, 5000);
+    </script>
+</body>
+</html>
