@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Details - QR Threat Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar glass-card">
+        <a href="/" class="navbar-brand">
+            <i class="fas fa-shield-halved"></i> QR Threat Detector
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="{{ url_for('dashboard') }}" class="nav-link">
+                <i class="fas fa-chart-pie"></i> Dashboard
+            </a></li>
+            <li><a href="{{ url_for('scan') }}" class="nav-link">
+                <i class="fas fa-qrcode"></i> Scan
+            </a></li>
+            <li><a href="{{ url_for('history') }}" class="nav-link active">
+                <i class="fas fa-history"></i> History
+            </a></li>
+            <li class="dropdown">
+                <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="fas fa-user-circle"></i> {{ current_user.username }}
+                </a>
+                <ul class="dropdown-menu" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+                    <li><a class="dropdown-item" href="{{ url_for('profile') }}" style="color: var(--text-primary);">
+                        <i class="fas fa-user"></i> Profile
+                    </a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('logout') }}" style="color: var(--accent-danger);">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a></li>
+                </ul>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-info-circle"></i> Scan Details</h2>
+            <a href="{{ url_for('history') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to History
+            </a>
+        </div>
+
+        <div class="glass-card">
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="mb-4">
+                        <label class="text-muted small text-uppercase">URL</label>
+                        <h4 class="text-break">{{ scan.url }}</h4>
+                    </div>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <span class="badge {% if scan.verdict=='Safe' %}badge-safe{% elif scan.verdict=='Suspicious' %}badge-suspicious{% else %}badge-malicious{% endif %}" style="font-size: 1.2rem; padding: 0.8rem 1.5rem;">
+                        {{ scan.verdict }}
+                    </span>
+                    <div class="mt-2 text-muted">
+                        <i class="fas fa-calendar-alt"></i> {{ scan.timestamp }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5>Threat Score</h5>
+                    <span class="fw-bold">{{ scan.score }}%</span>
+                </div>
+                <div class="progress" style="height: 12px;">
+                    <div class="progress-bar {% if scan.verdict=='Safe' %}progress-bar-safe{% elif scan.verdict=='Suspicious' %}progress-bar-suspicious{% else %}progress-bar-malicious{% endif %}" 
+                         style="width: {{ scan.score }}%">
+                    </div>
+                </div>
+            </div>
+
+            {% if scan.analysis %}
+            <div class="mt-5">
+                <h5 class="mb-3"><i class="fas fa-microscope"></i> Analysis Breakdown</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="analysis-list">
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 {% if scan.analysis.has_https %}bg-success{% else %}bg-danger{% endif %}">
+                                <span><i class="fas {% if scan.analysis.has_https %}fa-lock text-success{% else %}fa-lock-open text-danger{% endif %} me-2"></i> SSL Encryption</span>
+                                <span class="badge {% if scan.analysis.has_https %}badge-safe{% else %}badge-malicious{% endif %}">
+                                    {% if scan.analysis.has_https %}HTTPS{% else %}HTTP{% endif %}
+                                </span>
+                            </div>
+                            
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 {% if scan.analysis.has_ip %}bg-danger{% else %}bg-success{% endif %}">
+                                <span><i class="fas fa-network-wired me-2"></i> IP Address Check</span>
+                                <span class="badge {% if scan.analysis.has_ip %}badge-malicious{% else %}badge-safe{% endif %}">
+                                    {% if scan.analysis.has_ip %}Found IP{% else %}No IP used{% endif %}
+                                </span>
+                            </div>
+
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 {% if scan.analysis.long_url %}bg-warning{% else %}bg-success{% endif %}">
+                                <span><i class="fas fa-text-width me-2"></i> URL Length</span>
+                                <span class="badge {% if scan.analysis.long_url %}badge-suspicious{% else %}badge-safe{% endif %}">
+                                    {% if scan.analysis.long_url %}Very Long{% else %}Normal{% endif %}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="analysis-list">
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 {% if scan.analysis.has_at %}bg-danger{% else %}bg-success{% endif %}">
+                                <span><i class="fas fa-at me-2"></i> Suspicious Symbols (@)</span>
+                                <span class="badge {% if scan.analysis.has_at %}badge-malicious{% else %}badge-safe{% endif %}">
+                                    {% if scan.analysis.has_at %}Present{% else %}None{% endif %}
+                                </span>
+                            </div>
+
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 {% if scan.analysis.many_dots %}bg-warning{% else %}bg-success{% endif %}">
+                                <span><i class="fas fa-ellipsis-h me-2"></i> Subdomain Check</span>
+                                <span class="badge {% if scan.analysis.many_dots %}badge-suspicious{% else %}badge-safe{% endif %}">
+                                    {% if scan.analysis.many_dots %}Too Many{% else %}Safe{% endif %}
+                                </span>
+                            </div>
+
+                            <div class="analysis-item d-flex justify-content-between align-items-center p-3 mb-2 rounded bg-opacity-10 bg-info">
+                                <span><i class="fas fa-tag me-2"></i> Scan Category</span>
+                                <span class="badge bg-info text-white">{{ scan.category }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info mt-5">
+                <i class="fas fa-info-circle"></i> Detailed analysis breakdown is not available for this legacy scan.
+            </div>
+            {% endif %}
+
+            <div class="mt-5 d-flex gap-3">
+                <a href="{{ url_for('toggle_favorite', scan_id=scan.id) }}" class="btn btn-lg {% if scan.favorite %}btn-warning{% else %}btn-secondary{% endif %}">
+                    <i class="fas fa-heart"></i> {% if scan.favorite %}Unfavorite{% else %}Favorite{% endif %}
+                </a>
+                <a href="{{ url_for('delete_scan', scan_id=scan.id) }}" class="btn btn-lg btn-outline-danger" onclick="return confirm('Permanently delete this scan record?');">
+                    <i class="fas fa-trash"></i> Delete Record
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-5">
+        <div class="container">
+            <p>&copy; 2025 QR Threat Detector. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

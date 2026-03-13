@@ -164,9 +164,14 @@
                             <td>{{ row.category }}</td>
                             <td>{{ row.timestamp }}</td>
                             <td>
-                                          <a href="{{ url_for('toggle_favorite', scan_id=row.id) }}" 
-                                              class="btn btn-sm {% if row.favorite %}btn-warning{% else %}btn-secondary{% endif %}"
-                                              title="{% if row.favorite %}Remove from favorites{% else %}Add to favorites{% endif %}">
+                                <a href="{{ url_for('scan_details', scan_id=row.id) }}" 
+                                   class="btn btn-sm btn-primary" 
+                                   title="View Details">
+                                    <i class="fas fa-info-circle"></i>
+                                </a>
+                                <a href="{{ url_for('toggle_favorite', scan_id=row.id) }}" 
+                                   class="btn btn-sm {% if row.favorite %}btn-warning{% else %}btn-secondary{% endif %}"
+                                   title="{% if row.favorite %}Remove from favorites{% else %}Add to favorites{% endif %}">
                                     <i class="fas fa-heart"></i>
                                 </a>
                                 <a href="{{ url_for('delete_scan', scan_id=row.id) }}" 

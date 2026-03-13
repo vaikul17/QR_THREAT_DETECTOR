@@ -91,27 +91,27 @@
                 <div class="stat-value">{{ total_scans }}</div>
                 <div class="stat-label">Total Scans</div>
             </div>
-            <div class="stat-card glass-card">
+            <a href="{{ url_for('history', verdict='Safe') }}" class="stat-card glass-card text-decoration-none">
                 <div class="stat-icon">
                     <i class="fas fa-check-circle" style="color: var(--accent-success);"></i>
                 </div>
                 <div class="stat-value">{{ stats.get('Safe', 0) }}</div>
                 <div class="stat-label">Safe URLs</div>
-            </div>
-            <div class="stat-card glass-card">
+            </a>
+            <a href="{{ url_for('history', verdict='Suspicious') }}" class="stat-card glass-card text-decoration-none">
                 <div class="stat-icon">
                     <i class="fas fa-exclamation-triangle" style="color: var(--accent-warning);"></i>
                 </div>
                 <div class="stat-value">{{ stats.get('Suspicious', 0) }}</div>
                 <div class="stat-label">Suspicious</div>
-            </div>
-            <div class="stat-card glass-card">
+            </a>
+            <a href="{{ url_for('history', verdict='Malicious') }}" class="stat-card glass-card text-decoration-none">
                 <div class="stat-icon">
                     <i class="fas fa-times-circle" style="color: var(--accent-danger);"></i>
                 </div>
                 <div class="stat-value">{{ stats.get('Malicious', 0) }}</div>
                 <div class="stat-label">Malicious</div>
-            </div>
+            </a>
             <div class="stat-card glass-card">
                 <div class="stat-icon">
                     <i class="fas fa-heart" style="color: var(--accent-secondary);"></i>
@@ -175,6 +175,9 @@
                             <td>{{ scan.category }}</td>
                             <td>{{ scan.timestamp }}</td>
                             <td>
+                                <a href="{{ url_for('scan_details', scan_id=scan.id) }}" class="btn btn-sm btn-primary" title="Details">
+                                    <i class="fas fa-info-circle"></i>
+                                </a>
                                 <a href="{{ url_for('toggle_favorite', scan_id=scan.id) }}" class="btn btn-sm {% if scan.favorite %}btn-warning{% else %}btn-secondary{% endif %}">
                                     <i class="fas fa-heart"></i>
                                 </a>

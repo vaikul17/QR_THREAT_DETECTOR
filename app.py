@@ -67,7 +67,7 @@ def load_user(user_id):
     return None
 
 # Helper functions
-def log_scan(user_id, url, risk, category='general'):
+def log_scan(user_id, url, risk, category='general', analysis=None):
     try:
         data = {
             "user_id": user_id,
@@ -75,6 +75,7 @@ def log_scan(user_id, url, risk, category='general'):
             "score": risk['score'],
             "verdict": risk['verdict'],
             "category": category,
+            "analysis": analysis,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         response = supabase.table('scans').insert(data).execute()
@@ -205,7 +206,7 @@ def scan():
             analysis = analyze_url(url)
             risk = calculate_risk(analysis)
             
-            scan_id = log_scan(current_user.id, url, risk)
+            scan_id = log_scan(current_user.id, url, risk, analysis=analysis)
             result = {
                 "url": url,
                 "risk": risk,
@@ -221,7 +222,7 @@ def scan():
             analysis = analyze_url(url)
             risk = calculate_risk(analysis)
             
-            scan_id = log_scan(current_user.id, url, risk)
+            scan_id = log_scan(current_user.id, url, risk, analysis=analysis)
             result = {
                 "url": url,
                 "risk": risk,
@@ -250,7 +251,7 @@ def bulk_scan():
                         url = decode_qr(filepath)
                         analysis = analyze_url(url)
                         risk = calculate_risk(analysis)
-                        scan_id = log_scan(current_user.id, url, risk, 'bulk')
+                        scan_id = log_scan(current_user.id, url, risk, category='bulk', analysis=analysis)
                         results.append({
                             "url": url,
                             "risk": risk,
@@ -378,7 +379,7 @@ def toggle_favorite(scan_id):
             supabase.table('scans').update({"favorite": new_fav}).eq('id', scan_id).execute()
     except Exception as e:
         print(f"Error toggling favorite: {e}")
-    return redirect(url_for('history'))
+    return redirect(request.referrer or url_for('history'))
 
 # Delete scan
 @app.route("/delete_scan/<int:scan_id>")
@@ -389,7 +390,23 @@ def delete_scan(scan_id):
         flash('Scan deleted successfully', 'success')
     except Exception as e:
         flash(f'Error deleting scan: {str(e)}', 'error')
-    return redirect(url_for('history'))
+    return redirect(request.referrer or url_for('history'))
+
+# Scan Details route
+@app.route("/scan/<int:scan_id>")
+@login_required
+def scan_details(scan_id):
+    try:
+        response = supabase.table('scans').select('*').eq('id', scan_id).eq('user_id', current_user.id).execute()
+        if response.data:
+            scan = response.data[0]
+            return render_template("scan_details.html", scan=scan)
+        else:
+            flash('Scan not found', 'error')
+            return redirect(url_for('history'))
+    except Exception as e:
+        flash(f'Error fetching scan details: {str(e)}', 'error')
+        return redirect(url_for('history'))
 
 # Profile route
 @app.route("/profile", methods=["GET", "POST"])
