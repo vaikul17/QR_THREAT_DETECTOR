@@ -714,7 +714,7 @@ def promote_user(user_id):
 @admin_required
 def backup_db():
     import shutil
-    backup_path = f"instance/backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    backup_path = os.path.join(BASE_DIR, "instance", f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
     shutil.copy(DB_PATH, backup_path)
     return send_file(backup_path, as_attachment=True)
 
