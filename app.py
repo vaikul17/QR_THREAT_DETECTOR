@@ -175,12 +175,14 @@ def log_scan(user_id, url, risk, category='general'):
 # Routes
 @app.route("/health")
 def health_check():
-    """Health check endpoint for debugging"""
+    """Real health check for debugging - BYPASSES MOCK"""
     try:
-        conn = get_db_connection_safe()
+        # Use the raw connection tool that doesn't hide errors
+        conn = get_db_connection()
+        if conn is None:
+            return {"status": "unhealthy", "database": "Connection returned None. Check DB_URL."}, 500
         c = conn.cursor()
         c.execute("SELECT 1")
-        result = c.fetchone()
         conn.close()
         return {"status": "healthy", "database": "connected"}, 200
     except Exception as e:
@@ -212,7 +214,11 @@ def login():
         password = request.form.get("password")
         remember = request.form.get("remember", False)
         
-        conn = get_db_connection_safe()
+        conn = get_db_connection()
+        if conn is None:
+            flash('Database Connection Error. Please verify your Supabase settings.', 'error')
+            return render_template("login.html", page='login')
+            
         c = conn.cursor(cursor_factory=RealDictCursor)
         c.execute("SELECT * FROM users WHERE username = %s", (username,))
         user = c.fetchone()
