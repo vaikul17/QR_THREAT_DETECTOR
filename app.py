@@ -24,8 +24,12 @@ UPLOAD_FOLDER = "static/uploads"
 REPORT_FOLDER = "static/reports"
 
 # Supabase PostgreSQL Connection String
-DB_URL = "postgresql://postgres:9S@#V8jP2cKL5mX@db.eeloeocxzuaagnhmklmf.supabase.co:5432/postgres"
+# URL-encoded to handle special characters in the password (@ -> %40, # -> %23)
+DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@db.eeloeocxzuaagnhmklmf.supabase.co:5432/postgres"
 
+# For SQLAlchemy/Vercel compat, sometimes "postgres://" needs to be "postgresql://"
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 # Bulletproof check for Vercel/Read-Only filesystem
 try:
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
