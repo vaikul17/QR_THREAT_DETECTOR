@@ -137,6 +137,14 @@ def log_scan(user_id, url, risk, category='general'):
 # Routes
 @app.route("/")
 def index():
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM users LIMIT 1")
+        conn.close()
+    except Exception as e:
+        return f"<h1 style='color:red'>SUPABASE DEBUG:</h1><h2>{str(e)}</h2><br><pre>{type(e).__name__}</pre>", 500
+        
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return render_template("index.html", page='home')
@@ -792,10 +800,7 @@ def not_found(e):
 
 @app.errorhandler(500)
 def server_error(e):
-    # TEMPORARY LOGGING: Return the exact exception string to the screen 
-    # to bypass Vercel's logging limitations.
-    import traceback
-    return f"<h1>Internal Server Error</h1><pre>{str(e)}</pre>", 500
+    return render_template("error.html", error="Internal server error"), 500
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
