@@ -27,7 +27,7 @@ REPORT_FOLDER = "static/reports"
 # WARNING: Vercel does not support Supabase's new IPv6 direct connections (Port 5432).
 # We MUST use the IPv4 connection pooler on Port 6543 for Vercel Serverless.
 # URL-encoded to handle special characters in the password (@ -> %40, # -> %23)
-DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
 
 # For SQLAlchemy/Vercel compat, sometimes "postgres://" needs to be "postgresql://"
 if DB_URL.startswith("postgres://"):
@@ -137,14 +137,6 @@ def log_scan(user_id, url, risk, category='general'):
 # Routes
 @app.route("/")
 def index():
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM users LIMIT 1")
-        conn.close()
-    except Exception as e:
-        return f"<h1 style='color:red'>SUPABASE DEBUG:</h1><h2>{str(e)}</h2><br><pre>{type(e).__name__}</pre>", 500
-        
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return render_template("index.html", page='home')
