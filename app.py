@@ -62,90 +62,53 @@ class User(UserMixin):
 
 # Helper functions
 def get_db_connection():
-    try:
-        # Connect directly to the external Supabase Postgres database
-        conn = psycopg2.connect(DB_URL, connect_timeout=10)
-        return conn
-    except Exception as e:
-        print(f"Database connection error: {e}")
-        # Return None to indicate connection failure
-        return None
-
-def get_db_connection_safe():
-    """Safe database connection that doesn't crash the app"""
-    conn = get_db_connection()
-    if conn is None:
-        # If we can't connect to the database, return a mock connection
-        # This prevents the app from crashing on Vercel
-        class MockRow:
-            def __getitem__(self, key): return None
-            def __getattr__(self, name): return None
-            def __len__(self): return 0
-
-        class MockConnection:
-            def cursor(self, **kwargs):
-                class MockCursor:
-                    def execute(self, *args, **kwargs): pass
-                    def fetchone(self): return MockRow()
-                    def fetchall(self): return []
-                    def close(self): pass
-                return MockCursor()
-            def close(self): pass
-            def commit(self): pass
-        return MockConnection()
+    # Connect directly to the external Supabase Postgres database
+    conn = psycopg2.connect(DB_URL)
     return conn
 
 @login_manager.user_loader
 def load_user(user_id):
-    try:
-        conn = get_db_connection_safe()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-        user = c.fetchone()
-        conn.close()
-        if user:
-            return User(user['id'], user['username'], user['email'], user['password_hash'], user['role'], user['created_at'])
-    except Exception as e:
-        print(f"Error loading user {user_id}: {e}")
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    user = c.fetchone()
+    conn.close()
+    if user:
+        return User(user['id'], user['username'], user['email'], user['password_hash'], user['role'], user['created_at'])
     return None
 
 # Database initialization
 def init_db():
-    try:
-        conn = get_db_connection_safe()
-        c = conn.cursor()
-        
-        # Users table
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (id SERIAL PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, 
-                      password_hash TEXT, role TEXT DEFAULT 'user', theme TEXT DEFAULT 'dark',
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        
-        # Scans table
-        c.execute('''CREATE TABLE IF NOT EXISTS scans
-                     (id SERIAL PRIMARY KEY, user_id INTEGER, url TEXT, 
-                      score INTEGER, verdict TEXT, category TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                      favorite INTEGER DEFAULT 0, notes TEXT,
-                      FOREIGN KEY(user_id) REFERENCES users(id))''')
-        
-        # Settings table
-        c.execute('''CREATE TABLE IF NOT EXISTS settings
-                     (id SERIAL PRIMARY KEY, user_id INTEGER, key TEXT, value TEXT,
-                      FOREIGN KEY(user_id) REFERENCES users(id))''')
-        
-        # Create default admin user if not exists
-        c.execute("SELECT * FROM users WHERE username = 'admin'")
-        if not c.fetchone():
-            admin_hash = generate_password_hash("admin123")
-            c.execute("INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, %s)",
-                      ("admin", "admin@qrthreat.com", admin_hash, "admin"))
-        
-        conn.commit()
-        conn.close()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Database initialization error: {e}")
-        # Don't crash the app if DB init fails
+    conn = psycopg2.connect(DB_URL)
+    c = conn.cursor()
+    
+    # Users table
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id SERIAL PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, 
+                  password_hash TEXT, role TEXT DEFAULT 'user', theme TEXT DEFAULT 'dark',
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    
+    # Scans table
+    c.execute('''CREATE TABLE IF NOT EXISTS scans
+                 (id SERIAL PRIMARY KEY, user_id INTEGER, url TEXT, 
+                  score INTEGER, verdict TEXT, category TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  favorite INTEGER DEFAULT 0, notes TEXT,
+                  FOREIGN KEY(user_id) REFERENCES users(id))''')
+    
+    # Settings table
+    c.execute('''CREATE TABLE IF NOT EXISTS settings
+                 (id SERIAL PRIMARY KEY, user_id INTEGER, key TEXT, value TEXT,
+                  FOREIGN KEY(user_id) REFERENCES users(id))''')
+    
+    # Create default admin user if not exists
+    c.execute("SELECT * FROM users WHERE username = 'admin'")
+    if not c.fetchone():
+        admin_hash = generate_password_hash("admin123")
+        c.execute("INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, %s)",
+                  ("admin", "admin@qrthreat.com", admin_hash, "admin"))
+    
+    conn.commit()
+    conn.close()
 
 # We deliberately DO NOT call init_db() globally here anymore.
 # Vercel's serverless cold-boots will crash or hang trying to run DDL creation queries.
@@ -162,7 +125,7 @@ def admin_required(f):
     return decorated_function
 
 def log_scan(user_id, url, risk, category='general'):
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("INSERT INTO scans (user_id, url, score, verdict, category, timestamp) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -173,31 +136,11 @@ def log_scan(user_id, url, risk, category='general'):
     return scan_id
 
 # Routes
-@app.route("/health")
-def health_check():
-    """Real health check for debugging - BYPASSES MOCK"""
-    try:
-        # Use the raw connection tool that doesn't hide errors
-        conn = get_db_connection()
-        if conn is None:
-            return {"status": "unhealthy", "database": "Connection returned None. Check DB_URL."}, 500
-        c = conn.cursor()
-        c.execute("SELECT 1")
-        conn.close()
-        return {"status": "healthy", "database": "connected"}, 200
-    except Exception as e:
-        return {"status": "unhealthy", "database": f"error: {str(e)}"}, 500
-
 @app.route("/")
 def index():
-    try:
-        if current_user.is_authenticated:
-            return redirect(url_for('dashboard'))
-        return render_template("index.html", page='home')
-    except Exception as e:
-        print(f"Error in index route: {e}")
-        # If there's any error (like DB issues), just show the home page
-        return render_template("index.html", page='home')
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return render_template("index.html", page='home')
 
 @app.route("/home")
 def home():
@@ -215,10 +158,6 @@ def login():
         remember = request.form.get("remember", False)
         
         conn = get_db_connection()
-        if conn is None:
-            flash('Database Connection Error. Please verify your Supabase settings.', 'error')
-            return render_template("login.html", page='login')
-            
         c = conn.cursor(cursor_factory=RealDictCursor)
         c.execute("SELECT * FROM users WHERE username = %s", (username,))
         user = c.fetchone()
@@ -375,49 +314,39 @@ def bulk_scan():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    try:
-        conn = get_db_connection_safe()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Get statistics
-        c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY verdict", (current_user.id,))
-        stats = {row['verdict']: row['count'] for row in c.fetchall()}
-        
-        # Get recent scans
-        c.execute("SELECT * FROM scans WHERE user_id = %s ORDER BY timestamp DESC LIMIT 10", (current_user.id,))
-        recent_scans = c.fetchall()
-        
-        # Get category stats
-        c.execute("SELECT category, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY category", (current_user.id,))
-        category_stats = {row['category']: row['count'] for row in c.fetchall()}
-        
-        # Get total scans
-        c.execute("SELECT COUNT(*) as total FROM scans WHERE user_id = %s", (current_user.id,))
-        total_result = c.fetchone()
-        total_scans = total_result['total'] if total_result else 0
-        
-        # Get favorite scans
-        c.execute("SELECT COUNT(*) as fav FROM scans WHERE user_id = %s AND favorite = 1", (current_user.id,))
-        fav_result = c.fetchone()
-        favorite_count = fav_result['fav'] if fav_result else 0
-        
-        conn.close()
-        
-        return render_template("dashboard.html", page='dashboard', 
-                             stats=stats, 
-                             recent_scans=recent_scans,
-                             category_stats=category_stats,
-                             total_scans=total_scans,
-                             favorite_count=favorite_count)
-    except Exception as e:
-        print(f"Error in dashboard route: {e}")
-        # Return dashboard with empty data if DB fails
-        return render_template("dashboard.html", page='dashboard', 
-                             stats={}, 
-                             recent_scans=[],
-                             category_stats={},
-                             total_scans=0,
-                             favorite_count=0)
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Get statistics
+    c.execute("SELECT verdict, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY verdict", (current_user.id,))
+    stats = {row['verdict']: row['count'] for row in c.fetchall()}
+    
+    # Get recent scans
+    c.execute("SELECT * FROM scans WHERE user_id = %s ORDER BY timestamp DESC LIMIT 10", (current_user.id,))
+    recent_scans = c.fetchall()
+    
+    # Get category stats
+    c.execute("SELECT category, COUNT(*) as count FROM scans WHERE user_id = %s GROUP BY category", (current_user.id,))
+    category_stats = {row['category']: row['count'] for row in c.fetchall()}
+    
+    # Get total scans
+    c.execute("SELECT COUNT(*) as total FROM scans WHERE user_id = %s", (current_user.id,))
+    total_result = c.fetchone()
+    total_scans = total_result['total'] if total_result else 0
+    
+    # Get favorite scans
+    c.execute("SELECT COUNT(*) as fav FROM scans WHERE user_id = %s AND favorite = 1", (current_user.id,))
+    fav_result = c.fetchone()
+    favorite_count = fav_result['fav'] if fav_result else 0
+    
+    conn.close()
+    
+    return render_template("dashboard.html", page='dashboard', 
+                         stats=stats, 
+                         recent_scans=recent_scans,
+                         category_stats=category_stats,
+                         total_scans=total_scans,
+                         favorite_count=favorite_count)
 
 # History route with filters
 @app.route("/history")
@@ -431,7 +360,7 @@ def history():
     page = request.args.get('page', 1, type=int)
     per_page = 20
     
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     
     query = "SELECT * FROM scans WHERE user_id = %s"
@@ -500,7 +429,7 @@ def history():
 @app.route("/toggle_favorite/<int:scan_id>")
 @login_required
 def toggle_favorite(scan_id):
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     c.execute("SELECT * FROM scans WHERE id = %s AND user_id = %s", (scan_id, current_user.id))
     scan = c.fetchone()
@@ -517,7 +446,7 @@ def toggle_favorite(scan_id):
 @app.route("/delete_scan/<int:scan_id>")
 @login_required
 def delete_scan(scan_id):
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM scans WHERE id = %s AND user_id = %s", (scan_id, current_user.id))
     conn.commit()
@@ -535,7 +464,7 @@ def profile():
         current_password = request.form.get("current_password")
         new_password = request.form.get("new_password")
         
-        conn = get_db_connection_safe()
+        conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         
         # Verify current password
@@ -583,7 +512,7 @@ def settings():
     if request.method == "POST":
         theme = request.form.get("theme")
         
-        conn = get_db_connection_safe()
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("UPDATE users SET theme = ? WHERE id = ?", (theme, current_user.id))
         conn.commit()
@@ -617,7 +546,7 @@ def export_pdf():
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY timestamp DESC LIMIT 100", (current_user.id,))
     rows = c.fetchall()
@@ -723,7 +652,7 @@ def api_scan_batch():
 @login_required
 @admin_required
 def admin():
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     
     # Get all users
@@ -758,7 +687,7 @@ def delete_user(user_id):
         flash('Cannot delete your own account', 'error')
         return redirect(url_for('admin'))
     
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM scans WHERE user_id = %s", (user_id,))
     c.execute("DELETE FROM users WHERE id = %s", (user_id,))
@@ -772,7 +701,7 @@ def delete_user(user_id):
 @login_required
 @admin_required
 def admin_delete_scan(scan_id):
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM scans WHERE id = %s", (scan_id,))
     conn.commit()
@@ -784,7 +713,7 @@ def admin_delete_scan(scan_id):
 @login_required
 @admin_required
 def promote_user(user_id):
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE users SET role = 'admin' WHERE id = %s", (user_id,))
     conn.commit()
@@ -803,7 +732,7 @@ def backup_db():
     # To backup a Postgres DB natively on a Vercel runtime (no pg_dump),
     # we export key tables to a CSV as a lightweight backup.
     
-    conn = get_db_connection_safe()
+    conn = get_db_connection()
     c = conn.cursor()
     
     # Create an in-memory string buffer for CSV
@@ -849,7 +778,7 @@ def toggle_theme():
     session['theme'] = new_theme
     
     if current_user.is_authenticated:
-        conn = get_db_connection_safe()
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("UPDATE users SET theme = %s WHERE id = %s", (new_theme, current_user.id))
         conn.commit()
