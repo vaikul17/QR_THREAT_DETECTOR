@@ -24,8 +24,10 @@ UPLOAD_FOLDER = "static/uploads"
 REPORT_FOLDER = "static/reports"
 
 # Supabase PostgreSQL Connection String
+# WARNING: Vercel does not support Supabase's new IPv6 direct connections (Port 5432).
+# We MUST use the IPv4 connection pooler on Port 6543 for Vercel Serverless.
 # URL-encoded to handle special characters in the password (@ -> %40, # -> %23)
-DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@db.eeloeocxzuaagnhmklmf.supabase.co:5432/postgres"
+DB_URL = "postgresql://postgres:9S%40%23V8jP2cKL5mX%40@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
 
 # For SQLAlchemy/Vercel compat, sometimes "postgres://" needs to be "postgresql://"
 if DB_URL.startswith("postgres://"):
@@ -107,7 +109,9 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+# We deliberately DO NOT call init_db() globally here anymore.
+# Vercel's serverless cold-boots will crash or hang trying to run DDL creation queries.
+# Tables MUST be created by pasting init_supabase.sql directly into the Supabase SQL editor.
 
 # Admin decorator
 def admin_required(f):
